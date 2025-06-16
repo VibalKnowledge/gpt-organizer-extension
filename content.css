@@ -1,0 +1,273 @@
+/* GPT Organizer Content Styles */
+
+.gpt-organizer-icon {
+  display: inline-block;
+  font-size: 12px;
+  margin-left: 4px;
+  opacity: 0.7;
+  transition: opacity 0.2s ease;
+}
+
+.gpt-organizer-icon:hover {
+  opacity: 1;
+}
+
+/* Highlight organized GPTs */
+a[href*="/g/"] .gpt-organizer-icon {
+  color: #10a37f;
+}
+
+/* Add subtle border to organized GPT links */
+a[href*="/g/"]:has(.gpt-organizer-icon) {
+  position: relative;
+}
+
+a[href*="/g/"]:has(.gpt-organizer-icon)::before {
+  content: '';
+  position: absolute;
+  left: -2px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #10a37f;
+  border-radius: 1px;
+  opacity: 0.5;
+}
+
+/* GPT Organizer Sidebar */
+#gpt-organizer-sidebar {
+  background: #f8f9fa;
+  border: 1px solid #e1e5e9;
+  border-radius: 8px;
+  margin: 8px 0;
+  padding: 12px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.gpt-organizer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #e1e5e9;
+}
+
+.gpt-organizer-header h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+#gpt-organizer-add-folder {
+  background: #10a37f;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  width: 24px;
+  height: 24px;
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#gpt-organizer-add-folder:hover {
+  background: #0d8f6f;
+}
+
+.gpt-folder {
+  margin-bottom: 8px;
+  border: 1px solid #e1e5e9;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.gpt-folder .folder-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px;
+  background: #ffffff;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.gpt-folder .folder-header:hover {
+  background: #f1f3f4;
+}
+
+.gpt-folder .folder-name {
+  font-weight: 500;
+  color: #1a1a1a;
+}
+
+.gpt-folder .folder-count {
+  background: #e5e7eb;
+  color: #6b7280;
+  padding: 2px 6px;
+  border-radius: 10px;
+  font-size: 11px;
+}
+
+.gpt-folder .folder-content {
+  display: none;
+  padding: 4px;
+  background: #f8f9fa;
+}
+
+.gpt-folder.expanded .folder-content {
+  display: block;
+}
+
+.folder-gpt-item {
+  padding: 6px 8px;
+  margin: 2px 0;
+  background: white;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  color: #1a1a1a;
+  border: 1px solid #e1e5e9;
+}
+
+.folder-gpt-item:hover {
+  background: #e5e7eb;
+  border-color: #10a37f;
+}
+
+.gpt-organizer-current-gpt {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #e1e5e9;
+}
+
+.current-gpt-header {
+  font-size: 12px;
+  font-weight: 600;
+  color: #6b7280;
+  margin-bottom: 4px;
+}
+
+#current-gpt-info {
+  font-size: 12px;
+  color: #1a1a1a;
+  margin-bottom: 8px;
+  padding: 4px;
+  background: white;
+  border-radius: 4px;
+  border: 1px solid #e1e5e9;
+}
+
+#add-current-gpt {
+  background: #10a37f;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  width: 100%;
+}
+
+#add-current-gpt:hover {
+  background: #0d8f6f;
+}
+
+/* Modal for adding GPTs to folders */
+.gpt-organizer-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.gpt-organizer-modal .modal-content {
+  background: white;
+  padding: 20px;
+  border-radius: 8px;
+  max-width: 300px;
+  width: 90%;
+}
+
+.gpt-organizer-modal h3 {
+  margin: 0 0 16px 0;
+  font-size: 16px;
+  color: #1a1a1a;
+}
+
+.folder-list {
+  margin-bottom: 16px;
+}
+
+.folder-option {
+  padding: 8px 12px;
+  margin: 4px 0;
+  background: #f8f9fa;
+  border: 1px solid #e1e5e9;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.folder-option:hover {
+  background: #e5e7eb;
+  border-color: #10a37f;
+}
+
+/* Notification */
+.gpt-organizer-notification {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  background: #10a37f;
+  color: white;
+  padding: 12px 16px;
+  border-radius: 6px;
+  font-size: 14px;
+  z-index: 10001;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  animation: slideIn 0.3s ease;
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* Quick access button (future enhancement) */
+.gpt-organizer-quick-access {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 10000;
+  background: #10a37f;
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 48px;
+  height: 48px;
+  font-size: 20px;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  transition: all 0.2s ease;
+}
+
+.gpt-organizer-quick-access:hover {
+  background: #0d8f6f;
+  transform: scale(1.05);
+}
