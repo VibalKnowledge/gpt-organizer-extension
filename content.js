@@ -1,10 +1,10 @@
-// GPT Organizer Chrome Extension - Integrated Sidebar Version
-// Features: Color coding, compact interface, collapsible header
+// GPT Organizer Chrome Extension - Enhanced Version
+// Features: Color coding, compact interface, collapsible header, drag-and-drop reordering
 
 (function() {
     'use strict';
 
-    // Color options for folders
+    // Color options for folders (expanded to 20 colors)
     const FOLDER_COLORS = [
         { name: 'Blue', value: '#3b82f6', bg: '#eff6ff' },
         { name: 'Green', value: '#10b981', bg: '#f0fdf4' },
@@ -13,17 +13,32 @@
         { name: 'Orange', value: '#f97316', bg: '#fff7ed' },
         { name: 'Pink', value: '#ec4899', bg: '#fdf2f8' },
         { name: 'Teal', value: '#14b8a6', bg: '#f0fdfa' },
-        { name: 'Indigo', value: '#6366f1', bg: '#eef2ff' }
+        { name: 'Indigo', value: '#6366f1', bg: '#eef2ff' },
+        { name: 'Emerald', value: '#059669', bg: '#ecfdf5' },
+        { name: 'Cyan', value: '#06b6d4', bg: '#ecfeff' },
+        { name: 'Sky', value: '#0ea5e9', bg: '#f0f9ff' },
+        { name: 'Violet', value: '#7c3aed', bg: '#f5f3ff' },
+        { name: 'Fuchsia', value: '#d946ef', bg: '#fdf4ff' },
+        { name: 'Rose', value: '#f43f5e', bg: '#fff1f2' },
+        { name: 'Amber', value: '#f59e0b', bg: '#fffbeb' },
+        { name: 'Lime', value: '#65a30d', bg: '#f7fee7' },
+        { name: 'Slate', value: '#64748b', bg: '#f8fafc' },
+        { name: 'Gray', value: '#6b7280', bg: '#f9fafb' },
+        { name: 'Zinc', value: '#71717a', bg: '#fafafa' },
+        { name: 'Stone', value: '#78716c', bg: '#fafaf9' }
     ];
 
     let isCollapsed = false;
     let folders = {};
+    let folderOrder = []; // New: track folder order
     let currentGPT = null;
+    let draggedElement = null;
 
     // Load data from storage
     function loadData() {
-        chrome.storage.sync.get(['gptFolders', 'headerCollapsed'], function(result) {
+        chrome.storage.sync.get(['gptFolders', 'folderOrder', 'headerCollapsed'], function(result) {
             folders = result.gptFolders || {};
+            folderOrder = result.folderOrder || Object.keys(folders);
             isCollapsed = result.headerCollapsed || false;
             injectIntoSidebar();
         });
@@ -33,6 +48,7 @@
     function saveData() {
         chrome.storage.sync.set({
             gptFolders: folders,
+            folderOrder: folderOrder,
             headerCollapsed: isCollapsed
         });
     }
@@ -204,11 +220,24 @@
                     width: 100%;
                     box-sizing: border-box;
                     display: block;
+                    cursor: move;
+                    position: relative;
                 }
                 
                 .folder-item:hover {
                     border-color: #d1d5db;
                     transform: translateY(-1px);
+                }
+                
+                .folder-item.dragging {
+                    opacity: 0.5;
+                    transform: rotate(2deg);
+                }
+                
+                .folder-item.drag-over {
+                    border-color: #3b82f6;
+                    border-width: 2px;
+                    background-color: #eff6ff;
                 }
                 
                 .folder-name {
@@ -327,6 +356,16 @@
                     background: #fef2f2;
                 }
                 
+                .drag-handle {
+                    position: absolute;
+                    left: 2px;
+                    top: 50%;
+                    transform: translateY(-50%);
+                    color: #9ca3af;
+                    font-size: 12px;
+                    cursor: move;
+                }
+                
                 .modal {
                     position: fixed;
                     top: 0;
@@ -375,7 +414,7 @@
                 
                 .color-options {
                     display: grid;
-                    grid-template-columns: repeat(4, 1fr);
+                    grid-template-columns: repeat(5, 1fr);
                     gap: 8px;
                     margin-top: 8px;
                 }
@@ -540,6 +579,62 @@
         }
     }
 
+    // Drag and drop functionality
+    function setupDragAndDrop(folderDiv, folderId) {
+        folderDiv.draggable = true;
+        
+        folderDiv.addEventListener('dragstart', function(e) {
+            draggedElement = this;
+            this.classList.add('dragging');
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/html', this.outerHTML);
+        });
+        
+        folderDiv.addEventListener('dragend', function(e) {
+            this.classList.remove('dragging');
+            draggedElement = null;
+            // Remove drag-over class from all items
+            document.querySelectorAll('.folder-item').forEach(item => {
+                item.classList.remove('drag-over');
+            });
+        });
+        
+        folderDiv.addEventListener('dragover', function(e) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            this.classList.add('drag-over');
+        });
+        
+        folderDiv.addEventListener('dragleave', function(e) {
+            this.classList.remove('drag-over');
+        });
+        
+        folderDiv.addEventListener('drop', function(e) {
+            e.preventDefault();
+            this.classList.remove('drag-over');
+            
+            if (draggedElement && draggedElement !== this) {
+                // Get the dragged folder ID
+                const draggedFolderId = draggedElement.dataset.folderId;
+                const targetFolderId = this.dataset.folderId;
+                
+                // Update folder order
+                const draggedIndex = folderOrder.indexOf(draggedFolderId);
+                const targetIndex = folderOrder.indexOf(targetFolderId);
+                
+                // Remove dragged item from its current position
+                folderOrder.splice(draggedIndex, 1);
+                
+                // Insert at new position
+                folderOrder.splice(targetIndex, 0, draggedFolderId);
+                
+                // Save and update display
+                saveData();
+                updateContent();
+            }
+        });
+    }
+
     // Update content
     function updateContent() {
         const currentSection = document.getElementById('current-gpt-display');
@@ -564,17 +659,33 @@
             currentSection.innerHTML = '';
         }
 
-        // Update folders list
+        // Update folders list in the specified order
         folderList.innerHTML = '';
-        Object.entries(folders).forEach(([folderId, folder]) => {
+        
+        // Ensure all folders are in the order array
+        Object.keys(folders).forEach(folderId => {
+            if (!folderOrder.includes(folderId)) {
+                folderOrder.push(folderId);
+            }
+        });
+        
+        // Remove deleted folders from order
+        folderOrder = folderOrder.filter(folderId => folders[folderId]);
+        
+        folderOrder.forEach(folderId => {
+            const folder = folders[folderId];
+            if (!folder) return;
+            
             const folderDiv = document.createElement('div');
             folderDiv.className = 'folder-item';
+            folderDiv.dataset.folderId = folderId;
             folderDiv.style.borderLeftColor = folder.color;
             folderDiv.style.borderLeftWidth = '3px';
             folderDiv.style.backgroundColor = FOLDER_COLORS.find(c => c.value === folder.color)?.bg || '#f9fafb';
             
             folderDiv.innerHTML = `
-                <div class="folder-header" style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+                <div class="drag-handle">⋮⋮</div>
+                <div class="folder-header" style="display: flex; align-items: center; justify-content: space-between; width: 100%; padding-left: 16px;">
                     <div style="display: flex; align-items: center; gap: 6px;">
                         <button class="folder-action-btn expand-btn" data-folder-id="${folderId}" title="Expand">▶</button>
                         <div class="folder-name" style="color: ${folder.color}">${folder.name}</div>
@@ -621,6 +732,9 @@
                 });
             });
             
+            // Setup drag and drop
+            setupDragAndDrop(folderDiv, folderId);
+            
             folderList.appendChild(folderDiv);
         });
     }
@@ -637,12 +751,13 @@
                     <input type="text" class="form-input" id="folder-name-input" placeholder="Enter folder name">
                 </div>
                 <div class="form-group">
-                    <label class="form-label">Choose Color</label>
+                    <label class="form-label">Choose Color (${FOLDER_COLORS.length} options)</label>
                     <div class="color-options">
                         ${FOLDER_COLORS.map((color, index) => `
                             <div class="color-option ${index === 0 ? 'selected' : ''}" 
                                  style="background-color: ${color.bg}; border-color: ${color.value};"
-                                 data-color="${color.value}">
+                                 data-color="${color.value}"
+                                 title="${color.name}">
                                 <div style="width: 16px; height: 16px; background-color: ${color.value}; border-radius: 50%;"></div>
                             </div>
                         `).join('')}
@@ -677,6 +792,7 @@
                     color: selectedColor,
                     gpts: []
                 };
+                folderOrder.push(folderId); // Add to end of order
                 saveData();
                 updateContent();
                 closeModal();
@@ -700,13 +816,16 @@
             <div class="modal-content">
                 <div class="modal-header">Add "${currentGPT.name}" to Folder</div>
                 <div class="form-group">
-                    ${Object.entries(folders).map(([folderId, folder]) => `
-                        <div style="margin-bottom: 8px;">
-                            <button class="btn btn-secondary add-gpt-btn" data-folder-id="${folderId}" style="width: 100%; text-align: left; border-left: 3px solid ${folder.color};">
-                                ${folder.name} (${folder.gpts.length} GPTs)
-                            </button>
-                        </div>
-                    `).join('')}
+                    ${folderOrder.map(folderId => {
+                        const folder = folders[folderId];
+                        return `
+                            <div style="margin-bottom: 8px;">
+                                <button class="btn btn-secondary add-gpt-btn" data-folder-id="${folderId}" style="width: 100%; text-align: left; border-left: 3px solid ${folder.color};">
+                                    ${folder.name} (${folder.gpts.length} GPTs)
+                                </button>
+                            </div>
+                        `;
+                    }).join('')}
                 </div>
                 <div class="modal-actions">
                     <button class="btn btn-secondary" id="cancel-add-btn">Cancel</button>
@@ -736,56 +855,11 @@
         }
     }
 
-    // View folder contents
-    function viewFolder(folderId) {
-        const folder = folders[folderId];
-        if (!folder) return;
-        
-        const modal = document.createElement('div');
-        modal.className = 'modal';
-        modal.innerHTML = `
-            <div class="modal-content">
-                <div class="modal-header" style="color: ${folder.color};">${folder.name}</div>
-                <div class="gpt-list">
-                    ${folder.gpts.map(gpt => `
-                        <div class="gpt-item">
-                            <a href="${gpt.url}" style="color: #3b82f6; text-decoration: none;">${gpt.name}</a>
-                            <button class="remove-gpt-btn" data-folder-id="${folderId}" data-gpt-id="${gpt.id}">Remove</button>
-                        </div>
-                    `).join('')}
-                </div>
-                <div class="modal-actions">
-                    <button class="btn btn-secondary" id="close-folder-btn">Close</button>
-                </div>
-            </div>
-        `;
-        
-        document.body.appendChild(modal);
-        
-        // Add event listeners
-        modal.querySelectorAll('.remove-gpt-btn').forEach(btn => {
-            btn.addEventListener('click', function() {
-                const folderId = this.dataset.folderId;
-                const gptId = this.dataset.gptId;
-                folders[folderId].gpts = folders[folderId].gpts.filter(gpt => gpt.id !== gptId);
-                saveData();
-                updateContent();
-                closeModal();
-                viewFolder(folderId);
-            });
-        });
-        
-        document.getElementById('close-folder-btn').addEventListener('click', closeModal);
-        
-        function closeModal() {
-            modal.remove();
-        }
-    }
-
     // Delete folder
     function deleteFolder(folderId) {
         if (confirm('Are you sure you want to delete this folder?')) {
             delete folders[folderId];
+            folderOrder = folderOrder.filter(id => id !== folderId);
             saveData();
             updateContent();
         }
@@ -813,7 +887,7 @@
         
         // Add event listeners
         document.getElementById('export-btn').addEventListener('click', function() {
-            const data = JSON.stringify(folders, null, 2);
+            const data = JSON.stringify({ folders, folderOrder }, null, 2);
             const blob = new Blob([data], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -834,7 +908,8 @@
                     reader.onload = function(e) {
                         try {
                             const importedData = JSON.parse(e.target.result);
-                            folders = importedData;
+                            folders = importedData.folders || importedData.gptFolders || {};
+                            folderOrder = importedData.folderOrder || Object.keys(folders);
                             saveData();
                             updateContent();
                             closeModal();
@@ -852,6 +927,7 @@
         document.getElementById('reset-btn').addEventListener('click', function() {
             if (confirm('Are you sure you want to reset all data? This cannot be undone.')) {
                 folders = {};
+                folderOrder = [];
                 saveData();
                 updateContent();
                 closeModal();
