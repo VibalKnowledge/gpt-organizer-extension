@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "GPT Organizer",
+  "name": "GPT Organizer - Folder Manager for Custom GPTs",
   "version": "1.0.0",
-  "description": "Organize your custom GPTs into folders for easy access",
+  "description": "Organize your custom ChatGPT models into color-coded folders. Seamlessly integrated into ChatGPT's sidebar for easy access.",
   "permissions": [
     "storage",
     "activeTab"
