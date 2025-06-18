@@ -1,10 +1,10 @@
-// GPT Organizer Chrome Extension - Enhanced Version
-// Features: Color coding, compact interface, collapsible header, drag-and-drop reordering
+// GPT Organizer Chrome Extension - v2.1.1
+// Phase 1 + Feedback: Collapsible Recent, Dark/Light Mode Toggle, Compact Modal
 
 (function() {
     'use strict';
 
-    // Color options for folders (expanded to 20 colors)
+    // Color options for folders (20 colors)
     const FOLDER_COLORS = [
         { name: 'Blue', value: '#3b82f6', bg: '#eff6ff' },
         { name: 'Green', value: '#10b981', bg: '#f0fdf4' },
@@ -28,18 +28,34 @@
         { name: 'Stone', value: '#78716c', bg: '#fafaf9' }
     ];
 
+    // Keyboard shortcuts
+    const SHORTCUTS = {
+        TOGGLE_SIDEBAR: 'KeyO',
+        SEARCH_FOCUS: 'KeyS',
+        CREATE_FOLDER: 'KeyF',
+        ESCAPE: 'Escape'
+    };
+
     let isCollapsed = false;
     let folders = {};
-    let folderOrder = []; // New: track folder order
+    let folderOrder = [];
     let currentGPT = null;
     let draggedElement = null;
+    let recentGPTs = [];
+    let searchQuery = '';
+    let isSearchActive = false;
+    let isRecentCollapsed = false;
+    let isDarkMode = false;
 
     // Load data from storage
     function loadData() {
-        chrome.storage.sync.get(['gptFolders', 'folderOrder', 'headerCollapsed'], function(result) {
+        chrome.storage.sync.get(['gptFolders', 'folderOrder', 'headerCollapsed', 'recentGPTs', 'recentCollapsed', 'darkMode'], function(result) {
             folders = result.gptFolders || {};
             folderOrder = result.folderOrder || Object.keys(folders);
             isCollapsed = result.headerCollapsed || false;
+            recentGPTs = result.recentGPTs || [];
+            isRecentCollapsed = result.recentCollapsed || false;
+            isDarkMode = result.darkMode || false;
             injectIntoSidebar();
         });
     }
@@ -49,8 +65,59 @@
         chrome.storage.sync.set({
             gptFolders: folders,
             folderOrder: folderOrder,
-            headerCollapsed: isCollapsed
+            headerCollapsed: isCollapsed,
+            recentGPTs: recentGPTs,
+            recentCollapsed: isRecentCollapsed,
+            darkMode: isDarkMode
         });
+    }
+
+    // Add to recent GPTs
+    function addToRecent(gpt) {
+        // Remove if already exists
+        recentGPTs = recentGPTs.filter(recent => recent.id !== gpt.id);
+        // Add to beginning
+        recentGPTs.unshift(gpt);
+        // Keep only last 10
+        recentGPTs = recentGPTs.slice(0, 10);
+        saveData();
+    }
+
+    // Search GPTs across all folders
+    function searchGPTs(query) {
+        if (!query.trim()) return [];
+        
+        const results = [];
+        const lowerQuery = query.toLowerCase();
+        
+        // Search in all folders
+        Object.entries(folders).forEach(([folderId, folder]) => {
+            folder.gpts.forEach(gpt => {
+                if (gpt.name.toLowerCase().includes(lowerQuery)) {
+                    results.push({
+                        ...gpt,
+                        folderName: folder.name,
+                        folderColor: folder.color,
+                        folderId: folderId
+                    });
+                }
+            });
+        });
+        
+        // Search in recent GPTs
+        recentGPTs.forEach(gpt => {
+            if (gpt.name.toLowerCase().includes(lowerQuery) && 
+                !results.find(r => r.id === gpt.id)) {
+                results.push({
+                    ...gpt,
+                    folderName: 'Recent',
+                    folderColor: '#6b7280',
+                    folderId: null
+                });
+            }
+        });
+        
+        return results;
     }
 
     // Detect current GPT
@@ -79,13 +146,132 @@
             currentGPT = {
                 id: gptId,
                 name: gptName,
-                url: url
+                url: url,
+                timestamp: Date.now()
             };
+            
+            // Add to recent GPTs
+            addToRecent(currentGPT);
         } else {
             currentGPT = null;
         }
         
         injectIntoSidebar();
+    }
+
+    // Setup keyboard shortcuts
+    function setupKeyboardShortcuts() {
+        document.addEventListener('keydown', function(e) {
+            // Only trigger if Ctrl+Shift is pressed
+            if (e.ctrlKey && e.shiftKey) {
+                switch(e.code) {
+                    case SHORTCUTS.TOGGLE_SIDEBAR:
+                        e.preventDefault();
+                        toggleCollapse();
+                        break;
+                    case SHORTCUTS.SEARCH_FOCUS:
+                        e.preventDefault();
+                        focusSearch();
+                        break;
+                    case SHORTCUTS.CREATE_FOLDER:
+                        e.preventDefault();
+                        showCreateFolderModal();
+                        break;
+                }
+            }
+            
+            // Escape key handling
+            if (e.code === SHORTCUTS.ESCAPE) {
+                if (isSearchActive) {
+                    clearSearch();
+                }
+                // Close any open modals
+                const modals = document.querySelectorAll('.modal');
+                modals.forEach(modal => modal.remove());
+            }
+        });
+    }
+
+    // Focus search input
+    function focusSearch() {
+        const searchInput = document.getElementById('gpt-search-input');
+        if (searchInput) {
+            searchInput.focus();
+            searchInput.select();
+        }
+    }
+
+    // Clear search
+    function clearSearch() {
+        const searchInput = document.getElementById('gpt-search-input');
+        if (searchInput) {
+            searchInput.value = '';
+            searchQuery = '';
+            isSearchActive = false;
+            updateContent();
+        }
+    }
+
+    // Toggle recent GPTs collapse
+    function toggleRecentCollapse() {
+        isRecentCollapsed = !isRecentCollapsed;
+        const recentList = document.querySelector('.recent-list');
+        const recentCaret = document.querySelector('.recent-caret');
+        
+        if (recentList && recentCaret) {
+            if (isRecentCollapsed) {
+                recentList.classList.add('collapsed');
+                recentCaret.classList.add('collapsed');
+            } else {
+                recentList.classList.remove('collapsed');
+                recentCaret.classList.remove('collapsed');
+            }
+            saveData();
+        }
+    }
+
+    // Toggle dark mode
+    function toggleDarkMode() {
+        isDarkMode = !isDarkMode;
+        saveData();
+        updateContent();
+    }
+
+    // Get theme-based colors
+    function getThemeColors() {
+        if (isDarkMode) {
+            return {
+                background: '#1f2937',
+                surface: '#374151',
+                text: '#f9fafb',
+                textSecondary: '#d1d5db',
+                border: '#4b5563',
+                hover: '#4b5563'
+            };
+        } else {
+            return {
+                background: 'white',
+                surface: 'white',
+                text: '#374151',
+                textSecondary: '#6b7280',
+                border: '#e5e7eb',
+                hover: '#f3f4f6'
+            };
+        }
+    }
+
+    // Format time ago
+    function timeAgo(timestamp) {
+        const now = Date.now();
+        const diff = now - timestamp;
+        const minutes = Math.floor(diff / 60000);
+        const hours = Math.floor(diff / 3600000);
+        const days = Math.floor(diff / 86400000);
+        
+        if (minutes < 1) return 'now';
+        if (minutes < 60) return `${minutes}m`;
+        if (hours < 24) return `${hours}h`;
+        return `${days}d`;
     }
 
     // Inject into ChatGPT's sidebar
@@ -108,13 +294,15 @@
             existingOrganizer.remove();
         }
 
+        const theme = getThemeColors();
+
         // Create organizer section
         const organizerSection = document.createElement('div');
         organizerSection.id = 'gpt-organizer-section';
         organizerSection.innerHTML = `
             <style>
                 #gpt-organizer-section {
-                    border-top: 1px solid #e5e7eb;
+                    border-top: 1px solid ${theme.border};
                     margin-top: 12px;
                     padding-top: 12px;
                     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -128,13 +316,13 @@
                     justify-content: space-between;
                     font-weight: 600;
                     font-size: 13px;
-                    color: #374151;
+                    color: ${theme.text};
                     border-radius: 6px;
                     transition: background-color 0.2s;
                 }
                 
                 .gpt-organizer-header:hover {
-                    background-color: #f3f4f6;
+                    background-color: ${theme.hover};
                 }
                 
                 .organizer-caret {
@@ -155,6 +343,136 @@
                 .gpt-organizer-content.collapsed {
                     max-height: 0;
                     padding: 0 12px;
+                }
+                
+                .search-section {
+                    margin-bottom: 12px;
+                }
+                
+                .search-input {
+                    width: 100%;
+                    padding: 6px 10px;
+                    border: 1px solid ${theme.border};
+                    border-radius: 4px;
+                    font-size: 11px;
+                    box-sizing: border-box;
+                    background: ${theme.surface};
+                    color: ${theme.text};
+                }
+                
+                .search-input:focus {
+                    outline: none;
+                    border-color: #3b82f6;
+                    box-shadow: 0 0 0 1px #3b82f6;
+                }
+                
+                .search-input::placeholder {
+                    color: ${theme.textSecondary};
+                }
+                
+                .search-results {
+                    margin-top: 8px;
+                    max-height: 200px;
+                    overflow-y: auto;
+                }
+                
+                .search-result-item {
+                    padding: 6px 8px;
+                    margin-bottom: 2px;
+                    border-radius: 4px;
+                    font-size: 11px;
+                    background: ${theme.surface};
+                    border: 1px solid ${theme.border};
+                    cursor: pointer;
+                    transition: background 0.2s;
+                }
+                
+                .search-result-item:hover {
+                    background: ${theme.hover};
+                }
+                
+                .search-result-name {
+                    font-weight: 500;
+                    color: #3b82f6;
+                    margin-bottom: 2px;
+                }
+                
+                .search-result-folder {
+                    font-size: 10px;
+                    opacity: 0.7;
+                    color: ${theme.textSecondary};
+                }
+                
+                .recent-section {
+                    margin-bottom: 12px;
+                }
+                
+                .recent-header {
+                    font-size: 11px;
+                    font-weight: 600;
+                    color: ${theme.textSecondary};
+                    margin-bottom: 6px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    cursor: pointer;
+                    padding: 2px 4px;
+                    border-radius: 4px;
+                    transition: background-color 0.2s;
+                }
+                
+                .recent-header:hover {
+                    background-color: ${theme.hover};
+                }
+                
+                .recent-caret {
+                    transition: transform 0.2s;
+                    font-size: 10px;
+                }
+                
+                .recent-caret.collapsed {
+                    transform: rotate(-90deg);
+                }
+                
+                .recent-list {
+                    max-height: 120px;
+                    overflow-y: auto;
+                    transition: all 0.2s;
+                }
+                
+                .recent-list.collapsed {
+                    max-height: 0;
+                    overflow: hidden;
+                }
+                
+                .recent-item {
+                    padding: 4px 6px;
+                    margin-bottom: 2px;
+                    border-radius: 3px;
+                    font-size: 10px;
+                    background: ${theme.surface};
+                    border: 1px solid ${theme.border};
+                    cursor: pointer;
+                    transition: background 0.2s;
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                }
+                
+                .recent-item:hover {
+                    background: ${theme.hover};
+                }
+                
+                .recent-item-name {
+                    color: #3b82f6;
+                    font-weight: 500;
+                    flex: 1;
+                    text-decoration: none;
+                }
+                
+                .recent-item-time {
+                    font-size: 9px;
+                    color: ${theme.textSecondary};
                 }
                 
                 .current-gpt-section {
@@ -213,7 +531,7 @@
                 .folder-item {
                     margin-bottom: 6px;
                     padding: 6px 8px;
-                    border: 1px solid #e5e7eb;
+                    border: 1px solid ${theme.border};
                     border-radius: 4px;
                     transition: all 0.2s;
                     min-height: 28px;
@@ -222,10 +540,11 @@
                     display: block;
                     cursor: move;
                     position: relative;
+                    background: ${theme.surface};
                 }
                 
                 .folder-item:hover {
-                    border-color: #d1d5db;
+                    border-color: ${theme.textSecondary};
                     transform: translateY(-1px);
                 }
                 
@@ -247,8 +566,8 @@
                 
                 .folder-count {
                     font-size: 10px;
-                    color: #6b7280;
-                    background: #f3f4f6;
+                    color: ${theme.textSecondary};
+                    background: ${theme.hover};
                     padding: 1px 4px;
                     border-radius: 8px;
                 }
@@ -265,12 +584,12 @@
                     padding: 2px;
                     border-radius: 2px;
                     font-size: 10px;
-                    color: #6b7280;
+                    color: ${theme.textSecondary};
                 }
                 
                 .folder-action-btn:hover {
-                    background: #f3f4f6;
-                    color: #374151;
+                    background: ${theme.hover};
+                    color: ${theme.text};
                 }
                 
                 .folder-action-btn.delete-btn {
@@ -309,8 +628,8 @@
                     margin-bottom: 2px;
                     border-radius: 4px;
                     font-size: 11px;
-                    background: #f8f9fa;
-                    border: 1px solid #e9ecef;
+                    background: ${theme.surface};
+                    border: 1px solid ${theme.border};
                     width: 100% !important;
                     box-sizing: border-box;
                     position: relative;
@@ -320,7 +639,7 @@
                 }
                 
                 .folder-gpt-item:hover {
-                    background: #e9ecef;
+                    background: ${theme.hover};
                 }
                 
                 .folder-gpt-link {
@@ -361,9 +680,20 @@
                     left: 2px;
                     top: 50%;
                     transform: translateY(-50%);
-                    color: #9ca3af;
+                    color: ${theme.textSecondary};
                     font-size: 12px;
                     cursor: move;
+                }
+                
+                .shortcuts-hint {
+                    font-size: 9px;
+                    color: ${theme.textSecondary};
+                    text-align: center;
+                    margin-top: 8px;
+                    padding: 4px;
+                    background: ${theme.surface};
+                    border-radius: 3px;
+                    border: 1px solid ${theme.border};
                 }
                 
                 .modal {
@@ -380,21 +710,22 @@
                 }
                 
                 .modal-content {
-                    background: white;
-                    padding: 24px;
+                    background: ${theme.surface};
+                    padding: 20px;
                     border-radius: 8px;
                     width: 400px;
                     max-width: 90vw;
+                    color: ${theme.text};
                 }
                 
                 .modal-header {
                     font-size: 16px;
                     font-weight: 600;
-                    margin-bottom: 16px;
+                    margin-bottom: 12px;
                 }
                 
                 .form-group {
-                    margin-bottom: 16px;
+                    margin-bottom: 12px;
                 }
                 
                 .form-label {
@@ -407,9 +738,15 @@
                 .form-input {
                     width: 100%;
                     padding: 8px 12px;
-                    border: 1px solid #d1d5db;
+                    border: 1px solid ${theme.border};
                     border-radius: 6px;
                     font-size: 13px;
+                    background: ${theme.background};
+                    color: ${theme.text};
+                }
+                
+                .form-input::placeholder {
+                    color: ${theme.textSecondary};
                 }
                 
                 .color-options {
@@ -444,7 +781,7 @@
                     display: flex;
                     gap: 8px;
                     justify-content: flex-end;
-                    margin-top: 20px;
+                    margin-top: 16px;
                 }
                 
                 .btn {
@@ -466,12 +803,12 @@
                 }
                 
                 .btn-secondary {
-                    background: #f3f4f6;
-                    color: #374151;
+                    background: ${theme.hover};
+                    color: ${theme.text};
                 }
                 
                 .btn-secondary:hover {
-                    background: #e5e7eb;
+                    background: ${theme.border};
                 }
                 
                 .btn-danger {
@@ -486,18 +823,19 @@
                 .gpt-list {
                     max-height: 200px;
                     overflow-y: auto;
-                    border: 1px solid #e5e7eb;
+                    border: 1px solid ${theme.border};
                     border-radius: 6px;
                     margin-top: 8px;
                 }
                 
                 .gpt-item {
                     padding: 8px 12px;
-                    border-bottom: 1px solid #f3f4f6;
+                    border-bottom: 1px solid ${theme.border};
                     display: flex;
                     justify-content: space-between;
                     align-items: center;
                     font-size: 12px;
+                    background: ${theme.surface};
                 }
                 
                 .gpt-item:last-child {
@@ -505,7 +843,7 @@
                 }
                 
                 .gpt-item:hover {
-                    background: #f9fafb;
+                    background: ${theme.hover};
                 }
                 
                 .remove-gpt-btn {
@@ -521,6 +859,35 @@
                 .remove-gpt-btn:hover {
                     background: #fef2f2;
                 }
+                
+                .theme-toggle {
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                    margin-bottom: 8px;
+                }
+                
+                .theme-switch {
+                    position: relative;
+                    width: 44px;
+                    height: 24px;
+                    background: ${isDarkMode ? '#3b82f6' : '#d1d5db'};
+                    border-radius: 12px;
+                    cursor: pointer;
+                    transition: background 0.2s;
+                }
+                
+                .theme-switch::after {
+                    content: '';
+                    position: absolute;
+                    top: 2px;
+                    left: ${isDarkMode ? '22px' : '2px'};
+                    width: 20px;
+                    height: 20px;
+                    background: white;
+                    border-radius: 50%;
+                    transition: left 0.2s;
+                }
             </style>
             
             <div class="gpt-organizer-header" id="organizer-header">
@@ -529,10 +896,27 @@
             </div>
             
             <div class="gpt-organizer-content ${isCollapsed ? 'collapsed' : ''}">
+                <div class="search-section">
+                    <input type="text" class="search-input" id="gpt-search-input" placeholder="🔍 Search GPTs... (Ctrl+Shift+S)">
+                    <div class="search-results" id="search-results"></div>
+                </div>
+                
+                <div class="recent-section" id="recent-section">
+                    <div class="recent-header" id="recent-header">
+                        <span>🕒 Recent GPTs</span>
+                        <span class="recent-caret ${isRecentCollapsed ? 'collapsed' : ''}">▼</span>
+                    </div>
+                    <div class="recent-list ${isRecentCollapsed ? 'collapsed' : ''}" id="recent-list"></div>
+                </div>
+                
                 <div id="current-gpt-display"></div>
                 <div class="folder-list" id="folder-list"></div>
-                <button class="organizer-btn" id="create-folder-btn">+ Create Folder</button>
+                <button class="organizer-btn" id="create-folder-btn">+ Create Folder (Ctrl+Shift+F)</button>
                 <button class="organizer-btn settings-btn" id="settings-btn">⚙️ Settings</button>
+                
+                <div class="shortcuts-hint">
+                    💡 Ctrl+Shift+O: Toggle | S: Search | F: New Folder | Esc: Clear
+                </div>
             </div>
         `;
 
@@ -543,8 +927,42 @@
         document.getElementById('organizer-header').addEventListener('click', toggleCollapse);
         document.getElementById('create-folder-btn').addEventListener('click', showCreateFolderModal);
         document.getElementById('settings-btn').addEventListener('click', showSettingsModal);
+        document.getElementById('recent-header').addEventListener('click', toggleRecentCollapse);
+        
+        // Search functionality
+        const searchInput = document.getElementById('gpt-search-input');
+        searchInput.addEventListener('input', handleSearch);
+        searchInput.addEventListener('focus', () => isSearchActive = true);
 
         updateContent();
+    }
+
+    // Handle search input
+    function handleSearch(e) {
+        searchQuery = e.target.value;
+        isSearchActive = searchQuery.length > 0;
+        
+        const searchResults = document.getElementById('search-results');
+        
+        if (searchQuery.length === 0) {
+            searchResults.innerHTML = '';
+            updateContent();
+            return;
+        }
+        
+        const results = searchGPTs(searchQuery);
+        
+        if (results.length === 0) {
+            searchResults.innerHTML = '<div style="padding: 8px; font-size: 10px; color: #6b7280; text-align: center;">No GPTs found</div>';
+            return;
+        }
+        
+        searchResults.innerHTML = results.map(result => `
+            <div class="search-result-item" onclick="window.open('${result.url}', '_self')">
+                <div class="search-result-name">${result.name}</div>
+                <div class="search-result-folder" style="color: ${result.folderColor}">📁 ${result.folderName}</div>
+            </div>
+        `).join('');
     }
 
     // Toggle collapse state
@@ -639,8 +1057,23 @@
     function updateContent() {
         const currentSection = document.getElementById('current-gpt-display');
         const folderList = document.getElementById('folder-list');
+        const recentSection = document.getElementById('recent-section');
+        const recentList = document.getElementById('recent-list');
         
         if (!currentSection || !folderList) return;
+
+        // Update recent GPTs
+        if (recentGPTs.length > 0) {
+            recentSection.style.display = 'block';
+            recentList.innerHTML = recentGPTs.slice(0, 5).map(gpt => `
+                <div class="recent-item">
+                    <a href="${gpt.url}" class="recent-item-name">${gpt.name}</a>
+                    <span class="recent-item-time">${timeAgo(gpt.timestamp)}</span>
+                </div>
+            `).join('');
+        } else {
+            recentSection.style.display = 'none';
+        }
 
         // Update current GPT section
         if (currentGPT) {
@@ -657,6 +1090,14 @@
             }
         } else {
             currentSection.innerHTML = '';
+        }
+
+        // Hide folders if searching
+        if (isSearchActive) {
+            folderList.style.display = 'none';
+            return;
+        } else {
+            folderList.style.display = 'block';
         }
 
         // Update folders list in the specified order
@@ -741,6 +1182,7 @@
 
     // Show create folder modal
     function showCreateFolderModal() {
+        const theme = getThemeColors();
         const modal = document.createElement('div');
         modal.className = 'modal';
         modal.innerHTML = `
@@ -810,6 +1252,7 @@
     function showAddToFolderModal() {
         if (!currentGPT) return;
         
+        const theme = getThemeColors();
         const modal = document.createElement('div');
         modal.className = 'modal';
         modal.innerHTML = `
@@ -867,14 +1310,20 @@
 
     // Show settings modal
     function showSettingsModal() {
+        const theme = getThemeColors();
         const modal = document.createElement('div');
         modal.className = 'modal';
         modal.innerHTML = `
             <div class="modal-content">
                 <div class="modal-header">Settings</div>
                 <div class="form-group">
+                    <div class="theme-toggle">
+                        <span>Dark Mode</span>
+                        <div class="theme-switch" id="theme-switch"></div>
+                    </div>
                     <button class="btn btn-secondary" id="export-btn" style="width: 100%; margin-bottom: 8px;">Export Data</button>
                     <button class="btn btn-secondary" id="import-btn" style="width: 100%; margin-bottom: 8px;">Import Data</button>
+                    <button class="btn btn-secondary" id="clear-recent-btn" style="width: 100%; margin-bottom: 8px;">Clear Recent GPTs</button>
                     <button class="btn btn-danger" id="reset-btn" style="width: 100%;">Reset All Data</button>
                 </div>
                 <div class="modal-actions">
@@ -886,8 +1335,15 @@
         document.body.appendChild(modal);
         
         // Add event listeners
+        document.getElementById('theme-switch').addEventListener('click', function() {
+            toggleDarkMode();
+            closeModal();
+            // Re-inject to apply theme changes
+            setTimeout(injectIntoSidebar, 100);
+        });
+        
         document.getElementById('export-btn').addEventListener('click', function() {
-            const data = JSON.stringify({ folders, folderOrder }, null, 2);
+            const data = JSON.stringify({ folders, folderOrder, recentGPTs, isDarkMode }, null, 2);
             const blob = new Blob([data], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -910,6 +1366,8 @@
                             const importedData = JSON.parse(e.target.result);
                             folders = importedData.folders || importedData.gptFolders || {};
                             folderOrder = importedData.folderOrder || Object.keys(folders);
+                            recentGPTs = importedData.recentGPTs || [];
+                            isDarkMode = importedData.isDarkMode || false;
                             saveData();
                             updateContent();
                             closeModal();
@@ -924,10 +1382,21 @@
             input.click();
         });
         
+        document.getElementById('clear-recent-btn').addEventListener('click', function() {
+            if (confirm('Clear all recent GPTs?')) {
+                recentGPTs = [];
+                saveData();
+                updateContent();
+                closeModal();
+            }
+        });
+        
         document.getElementById('reset-btn').addEventListener('click', function() {
             if (confirm('Are you sure you want to reset all data? This cannot be undone.')) {
                 folders = {};
                 folderOrder = [];
+                recentGPTs = [];
+                isDarkMode = false;
                 saveData();
                 updateContent();
                 closeModal();
@@ -945,6 +1414,7 @@
     function init() {
         loadData();
         detectCurrentGPT();
+        setupKeyboardShortcuts();
         
         // Watch for URL changes
         let lastUrl = location.href;
