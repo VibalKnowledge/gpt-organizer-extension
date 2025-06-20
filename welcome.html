@@ -105,6 +105,29 @@
       padding: 0;
     }
     
+    .tips {
+      background: #f0f9ff;
+      padding: 24px;
+      border-radius: 8px;
+      margin: 32px 0;
+      border-left: 4px solid #3b82f6;
+    }
+    
+    .tips h3 {
+      color: #1e40af;
+      margin-top: 0;
+    }
+    
+    .tip-item {
+      margin: 8px 0;
+      color: #374151;
+      font-size: 14px;
+    }
+    
+    .tip-item strong {
+      color: #1e40af;
+    }
+    
     .cta {
       text-align: center;
       margin: 40px 0;
@@ -132,45 +155,67 @@
   <div class="header">
     <div class="logo">📁</div>
     <h1>GPT Organizer</h1>
-    <p class="subtitle">Organize your custom GPTs into folders for easy access</p>
+    <p class="subtitle">Organize your custom GPTs into folders with smart highlighting and right-click actions</p>
   </div>
 
   <div class="features">
     <div class="feature">
       <div class="feature-icon">🗂️</div>
-      <h3>Folder Organization</h3>
-      <p>Create custom folders to categorize your GPTs by topic, use case, or any system that works for you.</p>
+      <h3>Smart Folder Organization</h3>
+      <p>Create custom folders with color coding to categorize your GPTs. Drag and drop to reorder folders as needed.</p>
+    </div>
+    
+    <div class="feature">
+      <div class="feature-icon">✨</div>
+      <h3>Current GPT Highlighting</h3>
+      <p>Your currently active GPT is automatically highlighted at the top with a green gradient for instant recognition.</p>
+    </div>
+    
+    <div class="feature">
+      <div class="feature-icon">🖱️</div>
+      <h3>Right-Click Actions</h3>
+      <p>Right-click any GPT to quickly add it to existing folders or create new ones on the spot. No more complex menus!</p>
     </div>
     
     <div class="feature">
       <div class="feature-icon">🔍</div>
-      <h3>Quick Search</h3>
-      <p>Find your GPTs instantly with the built-in search functionality across all your organized folders.</p>
+      <h3>Smart Search</h3>
+      <p>Search through your organized GPTs and recent history. Only finds GPTs you've already interacted with.</p>
     </div>
     
     <div class="feature">
-      <div class="feature-icon">⚡</div>
-      <h3>One-Click Access</h3>
-      <p>Launch any of your organized GPTs directly from the extension popup with a single click.</p>
+      <div class="feature-icon">🌙</div>
+      <h3>Dark/Light Mode</h3>
+      <p>Seamlessly switch between dark and light themes to match your ChatGPT interface preferences.</p>
     </div>
     
     <div class="feature">
       <div class="feature-icon">💾</div>
-      <h3>Auto-Save</h3>
-      <p>Your folder structure and GPT organization is automatically saved and synced across browser sessions.</p>
+      <h3>Reliable Auto-Save</h3>
+      <p>Enhanced data persistence with error handling and backup storage ensures your organization never gets lost.</p>
     </div>
   </div>
 
   <div class="instructions">
     <h3>How to Get Started</h3>
     <ol>
-      <li class="step">Navigate to <strong>chat.openai.com</strong> or <strong>chatgpt.com</strong></li>
-      <li class="step">Click the GPT Organizer extension icon in your browser toolbar</li>
-      <li class="step">Create your first folder by clicking the <strong>"+ Folder"</strong> button</li>
-      <li class="step">Add GPTs to your folders by clicking <strong>"+ Add GPT to folder"</strong></li>
-      <li class="step">Use the search box to quickly find specific GPTs</li>
-      <li class="step">Click on any GPT name to open it directly in ChatGPT</li>
+      <li class="step">Navigate to <strong>chat.openai.com</strong> and open any custom GPT</li>
+      <li class="step">You'll see the GPT Organizer appear in the sidebar with your current GPT highlighted at the top</li>
+      <li class="step">Click the <strong>"+ Create Folder"</strong> button to make your first folder</li>
+      <li class="step">Right-click on your current GPT (or any GPT in Recent GPTs) to add it to a folder</li>
+      <li class="step">Use the search box at the bottom to find specific GPTs you've organized</li>
+      <li class="step">Click the gear icon (⚙) in the header to access settings and keyboard shortcuts</li>
     </ol>
+  </div>
+
+  <div class="tips">
+    <h3>Pro Tips</h3>
+    <div class="tip-item"><strong>Keyboard Shortcuts:</strong> Ctrl+Shift+F to create folders, Ctrl+Shift+S to search, Ctrl+Shift+O to toggle</div>
+    <div class="tip-item"><strong>Organization:</strong> Current GPT appears first, then your folders, then recent GPTs, and search at the bottom</div>
+    <div class="tip-item"><strong>Right-Click Magic:</strong> Right-click any GPT to instantly add to folders or create new ones</div>
+    <div class="tip-item"><strong>Search Scope:</strong> Search only works for GPTs in folders or recent history—not all available GPTs</div>
+    <div class="tip-item"><strong>Theme Sync:</strong> Toggle dark/light mode in settings without closing the settings panel</div>
+    <div class="tip-item"><strong>Drag & Drop:</strong> Reorder your folders by dragging them up and down</div>
   </div>
 
   <div class="cta">
