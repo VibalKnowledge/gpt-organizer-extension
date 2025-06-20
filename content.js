@@ -1,10 +1,35 @@
-// GPT Organizer Chrome Extension - v1.1.0
-// Phase 1 + Feedback: Collapsible Recent, Dark/Light Mode Toggle, Compact Modal
+/**
+ * GPT Organizer Chrome Extension - v1.1.0
+ * 
+ * A professional Chrome extension for organizing custom ChatGPT models into
+ * color-coded folders with advanced features including drag & drop, search,
+ * dark/light themes, and keyboard shortcuts.
+ * 
+ * Features:
+ * - Folder management with drag & drop reordering
+ * - Recent GPTs tracking with timestamps
+ * - Real-time search across all organized GPTs
+ * - Dark/light theme support with system integration
+ * - Keyboard shortcuts for power users
+ * - Context menus and modal dialogs
+ * - Persistent storage with sync across devices
+ * 
+ * @version 1.1.0
+ * @author GPT Organizer Team
+ * @license MIT
+ */
 
 (function() {
     'use strict';
 
-    // Color options for folders (20 colors)
+    // ============================================================================
+    // CONFIGURATION & CONSTANTS
+    // ============================================================================
+
+    /**
+     * Color palette for folder customization
+     * Provides 20 carefully selected colors with accessible contrast ratios
+     */
     const FOLDER_COLORS = [
         { name: 'Blue', value: '#3b82f6', bg: '#eff6ff' },
         { name: 'Green', value: '#10b981', bg: '#f0fdf4' },
@@ -28,7 +53,10 @@
         { name: 'Stone', value: '#78716c', bg: '#fafaf9' }
     ];
 
-    // Keyboard shortcuts
+    /**
+     * Keyboard shortcuts configuration
+     * Defines key combinations for power user functionality
+     */
     const SHORTCUTS = {
         TOGGLE_SIDEBAR: 'KeyO',
         SEARCH_FOCUS: 'KeyS',
@@ -36,29 +64,109 @@
         ESCAPE: 'Escape'
     };
 
+    /**
+     * Application configuration constants
+     * Centralizes all magic numbers and strings for maintainability
+     */
+    const CONFIG = {
+        TIMEOUTS: {
+            RETRY_INJECTION: 1000,
+            SAVE_DEBOUNCE: 1000,
+            NOTIFICATION_DISPLAY: 3000,
+            GPT_DETECTION_INTERVAL: 2000,
+            PAGE_LOAD_DELAY: 500
+        },
+        LIMITS: {
+            RECENT_GPTS: 10,
+            SEARCH_RESULTS: 50,
+            MAX_GPT_NAME_LENGTH: 100,
+            MIN_GPT_NAME_LENGTH: 3
+        },
+        STORAGE_KEYS: [
+            'gptFolders',
+            'folderOrder', 
+            'headerCollapsed',
+            'recentGPTs',
+            'recentCollapsed',
+            'darkMode'
+        ],
+        SELECTORS: {
+            SIDEBAR: 'nav[aria-label="Chat history"]',
+            SIDEBAR_FALLBACKS: ['nav', '[data-testid="navigation"]', 'aside', '.flex.h-full.w-full.flex-1.flex-col'],
+            ORGANIZER_SECTION: 'gpt-organizer-section'
+        },
+        MESSAGES: {
+            LOADING: 'GPT Organizer: Loading data...',
+            STORAGE_UNAVAILABLE: 'GPT Organizer: Chrome storage API not available',
+            SYNC_FAILED: 'GPT Organizer: Sync storage failed, using local storage',
+            LOCAL_FAILED: 'GPT Organizer: Local storage failed',
+            STARTUP_FAILED: 'GPT Organizer: Failed to start extension:'
+        }
+    };
+
+    // ============================================================================
+    // APPLICATION STATE
+    // ============================================================================
+
+    // UI State
     let isCollapsed = false;
     let folders = {};
     let folderOrder = [];
     let currentGPT = null;
+    
+    // Drag & Drop State
     let draggedElement = null;
+    
+    // Data State
     let recentGPTs = [];
     let searchQuery = '';
     let isSearchActive = false;
     let isRecentCollapsed = false;
     let isDarkMode = false;
+    
+    // System State
     let saveTimeout = null;
     let isDataLoaded = false;
 
-    // Load data from storage
+    // ============================================================================
+    // STORAGE MANAGEMENT
+    // ============================================================================
+
+    /**
+     * Error handling utility for consistent logging
+     */
+    const ErrorHandler = {
+        logWarning: (message, error = null) => {
+            console.warn(message, error || '');
+        },
+        logError: (message, error = null) => {
+            console.error(message, error || '');
+        },
+        logInfo: (message) => {
+            console.log(message);
+        }
+    };
+
+    /**
+     * Loads user data from Chrome storage (sync preferred, local fallback)
+     * Handles both sync and local storage for cross-device compatibility
+     */
     function loadData() {
-        console.log('GPT Organizer: Loading data...');
+        ErrorHandler.logInfo(CONFIG.MESSAGES.LOADING);
+        
+        if (typeof chrome === 'undefined' || !chrome.storage) {
+            ErrorHandler.logWarning(CONFIG.MESSAGES.STORAGE_UNAVAILABLE);
+            useDefaults();
+            return;
+        }
+        
         try {
             // First try to load from sync storage
-            chrome.storage.sync.get(['gptFolders', 'folderOrder', 'headerCollapsed', 'recentGPTs', 'recentCollapsed', 'darkMode'], function(result) {
+            chrome.storage.sync.get(CONFIG.STORAGE_KEYS, function(result) {
                 if (chrome.runtime.lastError) {
                     console.warn('GPT Organizer: Sync storage error, trying local storage:', chrome.runtime.lastError);
                     // Try local storage as backup
-                    chrome.storage.local.get(['gptFolders', 'folderOrder', 'headerCollapsed', 'recentGPTs', 'recentCollapsed', 'darkMode'], function(localResult) {
+                    chrome.storage.local.get(CONFIG.STORAGE_KEYS, function(localResult) {
                         if (chrome.runtime.lastError) {
                             console.warn('GPT Organizer: Local storage also failed:', chrome.runtime.lastError);
                             useDefaults();
@@ -149,7 +257,7 @@
         if (saveTimeout) {
             clearTimeout(saveTimeout);
         }
-        saveTimeout = setTimeout(saveData, 300);
+        saveTimeout = setTimeout(saveData, CONFIG.TIMEOUTS.SAVE_DEBOUNCE);
     }
 
     // Add to recent GPTs
@@ -164,8 +272,8 @@
         recentGPTs = recentGPTs.filter(recent => recent.id !== gpt.id);
         // Add to beginning
         recentGPTs.unshift(gpt);
-        // Keep only last 10
-        recentGPTs = recentGPTs.slice(0, 10);
+        // Keep only last N items
+        recentGPTs = recentGPTs.slice(0, CONFIG.LIMITS.RECENT_GPTS);
         saveData();
     }
 
@@ -203,7 +311,7 @@
             }
         });
         
-        return results;
+        return results.slice(0, CONFIG.LIMITS.SEARCH_RESULTS);
     }
 
     // Detect current GPT
@@ -272,7 +380,7 @@
                 setTimeout(() => {
                     console.log('GPT Organizer: Retrying GPT name detection...');
                     detectCurrentGPT();
-                }, 1000);
+                }, CONFIG.TIMEOUTS.RETRY_INJECTION);
                 return; // Don't set currentGPT yet
             }
             
@@ -565,25 +673,31 @@
             box-shadow: 0 4px 12px rgba(0,0,0,0.15);
         `;
         document.body.appendChild(notification);
-        setTimeout(() => notification.remove(), 3000);
+        setTimeout(() => notification.remove(), CONFIG.TIMEOUTS.NOTIFICATION_DISPLAY);
     }
 
-    // Inject into ChatGPT's sidebar
+    // ============================================================================
+    // UI INJECTION & RENDERING
+    // ============================================================================
+
+    /**
+     * Injects the GPT Organizer interface into ChatGPT's sidebar
+     * Uses multiple selectors for compatibility across ChatGPT updates
+     */
     function injectIntoSidebar() {
-        // Find ChatGPT's sidebar
-        const sidebar = document.querySelector('nav[aria-label="Chat history"]') || 
-                       document.querySelector('nav') ||
-                       document.querySelector('[data-testid="navigation"]') ||
-                       document.querySelector('aside') ||
-                       document.querySelector('.flex.h-full.w-full.flex-1.flex-col');
+        // Find ChatGPT's sidebar using multiple selectors for compatibility
+        const sidebar = document.querySelector(CONFIG.SELECTORS.SIDEBAR) || 
+                       CONFIG.SELECTORS.SIDEBAR_FALLBACKS.map(selector => 
+                           document.querySelector(selector)
+                       ).find(element => element !== null);
 
         if (!sidebar) {
-            setTimeout(injectIntoSidebar, 1000);
+            setTimeout(injectIntoSidebar, CONFIG.TIMEOUTS.RETRY_INJECTION);
             return;
         }
 
         // Remove existing organizer
-        const existingOrganizer = document.getElementById('gpt-organizer-section');
+        const existingOrganizer = document.getElementById(CONFIG.SELECTORS.ORGANIZER_SECTION);
         if (existingOrganizer) {
             existingOrganizer.remove();
         }
@@ -592,7 +706,7 @@
 
         // Create organizer section
         const organizerSection = document.createElement('div');
-        organizerSection.id = 'gpt-organizer-section';
+        organizerSection.id = CONFIG.SELECTORS.ORGANIZER_SECTION;
         organizerSection.innerHTML = `
             <style>
                 #gpt-organizer-section {
@@ -1676,7 +1790,7 @@
                         box-shadow: 0 4px 12px rgba(0,0,0,0.15);
                     `;
                     document.body.appendChild(notification);
-                    setTimeout(() => notification.remove(), 3000);
+                    setTimeout(() => notification.remove(), CONFIG.TIMEOUTS.NOTIFICATION_DISPLAY);
                 }
             }
         });
@@ -1898,7 +2012,14 @@
         }
     }
 
-    // Initialize
+    // ============================================================================
+    // INITIALIZATION & LIFECYCLE
+    // ============================================================================
+
+    /**
+     * Initializes the GPT Organizer extension
+     * Sets up all necessary components and event listeners
+     */
     function init() {
         loadData();
         detectCurrentGPT();
@@ -1910,22 +2031,34 @@
             const url = location.href;
             if (url !== lastUrl) {
                 lastUrl = url;
-                setTimeout(detectCurrentGPT, 1000);
+                setTimeout(detectCurrentGPT, CONFIG.TIMEOUTS.PAGE_LOAD_DELAY);
             }
         }).observe(document, { subtree: true, childList: true });
         
         // Re-inject if sidebar gets removed
         setInterval(() => {
-            if (!document.getElementById('gpt-organizer-section')) {
+            if (!document.getElementById(CONFIG.SELECTORS.ORGANIZER_SECTION)) {
                 injectIntoSidebar();
             }
-        }, 2000);
+        }, CONFIG.TIMEOUTS.GPT_DETECTION_INTERVAL);
     }
 
-    // Start when page is ready
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', init);
-    } else {
-        init();
+    /**
+     * Extension entry point with error handling
+     * Ensures proper initialization regardless of page load state
+     */
+    function startExtension() {
+        try {
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', init);
+            } else {
+                init();
+            }
+        } catch (error) {
+            ErrorHandler.logError(CONFIG.MESSAGES.STARTUP_FAILED, error);
+        }
     }
+
+    // Start the extension
+    startExtension();
 })();
