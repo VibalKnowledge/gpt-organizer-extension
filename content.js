@@ -1,4 +1,4 @@
-// GPT Organizer Chrome Extension - v2.1.1
+// GPT Organizer Chrome Extension - v1.1.0
 // Phase 1 + Feedback: Collapsible Recent, Dark/Light Mode Toggle, Compact Modal
 
 (function() {
@@ -46,34 +46,120 @@
     let isSearchActive = false;
     let isRecentCollapsed = false;
     let isDarkMode = false;
+    let saveTimeout = null;
+    let isDataLoaded = false;
 
     // Load data from storage
     function loadData() {
-        chrome.storage.sync.get(['gptFolders', 'folderOrder', 'headerCollapsed', 'recentGPTs', 'recentCollapsed', 'darkMode'], function(result) {
-            folders = result.gptFolders || {};
-            folderOrder = result.folderOrder || Object.keys(folders);
-            isCollapsed = result.headerCollapsed || false;
-            recentGPTs = result.recentGPTs || [];
-            isRecentCollapsed = result.recentCollapsed || false;
-            isDarkMode = result.darkMode || false;
+        console.log('GPT Organizer: Loading data...');
+        try {
+            // First try to load from sync storage
+            chrome.storage.sync.get(['gptFolders', 'folderOrder', 'headerCollapsed', 'recentGPTs', 'recentCollapsed', 'darkMode'], function(result) {
+                if (chrome.runtime.lastError) {
+                    console.warn('GPT Organizer: Sync storage error, trying local storage:', chrome.runtime.lastError);
+                    // Try local storage as backup
+                    chrome.storage.local.get(['gptFolders', 'folderOrder', 'headerCollapsed', 'recentGPTs', 'recentCollapsed', 'darkMode'], function(localResult) {
+                        if (chrome.runtime.lastError) {
+                            console.warn('GPT Organizer: Local storage also failed:', chrome.runtime.lastError);
+                            useDefaults();
+                        } else {
+                            console.log('GPT Organizer: Loaded from local storage:', localResult);
+                            applyLoadedData(localResult);
+                        }
+                        isDataLoaded = true;
+                        injectIntoSidebar();
+                    });
+                } else {
+                    console.log('GPT Organizer: Loaded from sync storage:', result);
+                    applyLoadedData(result);
+                    isDataLoaded = true;
+                    injectIntoSidebar();
+                }
+            });
+        } catch (error) {
+            console.error('GPT Organizer: Critical error in loadData:', error);
+            useDefaults();
+            isDataLoaded = true;
             injectIntoSidebar();
-        });
+        }
+    }
+    
+    // Apply loaded data with validation
+    function applyLoadedData(result) {
+        // Validate and apply data with fallbacks
+        folders = (result.gptFolders && typeof result.gptFolders === 'object') ? result.gptFolders : {};
+        folderOrder = Array.isArray(result.folderOrder) ? result.folderOrder : Object.keys(folders);
+        isCollapsed = typeof result.headerCollapsed === 'boolean' ? result.headerCollapsed : false;
+        recentGPTs = Array.isArray(result.recentGPTs) ? result.recentGPTs : [];
+        isRecentCollapsed = typeof result.recentCollapsed === 'boolean' ? result.recentCollapsed : false;
+        isDarkMode = typeof result.darkMode === 'boolean' ? result.darkMode : false;
+        
+        console.log('GPT Organizer: Applied data - Folders:', Object.keys(folders).length, 'Recent:', recentGPTs.length);
+    }
+    
+    // Use default values
+    function useDefaults() {
+        console.log('GPT Organizer: Using default values');
+        folders = {};
+        folderOrder = [];
+        isCollapsed = false;
+        recentGPTs = [];
+        isRecentCollapsed = false;
+        isDarkMode = false;
     }
 
     // Save data to storage
     function saveData() {
-        chrome.storage.sync.set({
+        const dataToSave = {
             gptFolders: folders,
             folderOrder: folderOrder,
             headerCollapsed: isCollapsed,
             recentGPTs: recentGPTs,
             recentCollapsed: isRecentCollapsed,
             darkMode: isDarkMode
-        });
+        };
+        
+        console.log('GPT Organizer: Saving data - Folders:', Object.keys(folders).length, 'Recent:', recentGPTs.length);
+        
+        try {
+            // Save to both sync and local storage for redundancy
+            chrome.storage.sync.set(dataToSave, function() {
+                if (chrome.runtime.lastError) {
+                    console.warn('GPT Organizer: Sync storage save failed:', chrome.runtime.lastError);
+                } else {
+                    console.log('GPT Organizer: Successfully saved to sync storage');
+                }
+            });
+            
+            // Always save to local storage as backup
+            chrome.storage.local.set(dataToSave, function() {
+                if (chrome.runtime.lastError) {
+                    console.warn('GPT Organizer: Local storage save failed:', chrome.runtime.lastError);
+                } else {
+                    console.log('GPT Organizer: Successfully saved to local storage');
+                }
+            });
+        } catch (error) {
+            console.error('GPT Organizer: Critical error in saveData:', error);
+        }
+    }
+
+    // Debounced save to prevent excessive storage operations
+    function debouncedSave() {
+        if (saveTimeout) {
+            clearTimeout(saveTimeout);
+        }
+        saveTimeout = setTimeout(saveData, 300);
     }
 
     // Add to recent GPTs
     function addToRecent(gpt) {
+        // Only save if data has been loaded to prevent overwriting
+        if (!isDataLoaded) {
+            console.log('GPT Organizer: Skipping addToRecent - data not loaded yet');
+            return;
+        }
+        
         // Remove if already exists
         recentGPTs = recentGPTs.filter(recent => recent.id !== gpt.id);
         // Add to beginning
@@ -128,30 +214,84 @@
         if (gptMatch) {
             const gptId = gptMatch[1];
             
-            // Try to get GPT name from page title or heading
-            let gptName = document.title;
+            // Try multiple methods to get GPT name
+            let gptName = null;
             
-            // Try to find a better name from the page content
-            const titleElement = document.querySelector('h1') || 
-                                document.querySelector('[data-testid="conversation-turn-0"] h1') ||
-                                document.querySelector('.text-2xl');
-            
-            if (titleElement && titleElement.textContent.trim()) {
-                gptName = titleElement.textContent.trim();
+            // Method 1: Try page title first
+            if (document.title && document.title !== 'ChatGPT') {
+                gptName = document.title
+                    .replace(/^ChatGPT - /, '')  // Remove "ChatGPT - " from start
+                    .replace(/ - ChatGPT$/, '')  // Remove " - ChatGPT" from end
+                    .trim();
             }
             
-            // Clean up the name
-            gptName = gptName.replace(' - ChatGPT', '').trim();
+            // Method 2: Look for various heading selectors
+            if (!gptName || gptName === 'ChatGPT' || gptName === 'GPT') {
+                const selectors = [
+                    'h1',
+                    '[data-testid="conversation-turn-0"] h1',
+                    '.text-2xl',
+                    '.text-xl',
+                    '.font-semibold',
+                    '[class*="text-"][class*="font-"]',
+                    'main h1',
+                    'main h2',
+                    '[role="main"] h1',
+                    '[role="main"] h2'
+                ];
+                
+                for (const selector of selectors) {
+                    const element = document.querySelector(selector);
+                    if (element && element.textContent.trim()) {
+                        const text = element.textContent.trim();
+                        if (text !== 'ChatGPT' && text !== 'GPT' && text.length > 0 && text.length < 100) {
+                            gptName = text;
+                            break;
+                        }
+                    }
+                }
+            }
             
-            currentGPT = {
-                id: gptId,
-                name: gptName,
-                url: url,
-                timestamp: Date.now()
-            };
+            // Method 3: Look in meta tags
+            if (!gptName || gptName === 'ChatGPT' || gptName === 'GPT') {
+                const metaTitle = document.querySelector('meta[property="og:title"]');
+                const metaDescription = document.querySelector('meta[name="description"]');
+                
+                if (metaTitle && metaTitle.content) {
+                    gptName = metaTitle.content
+                        .replace(/^ChatGPT - /, '')  // Remove "ChatGPT - " from start
+                        .replace(/ - ChatGPT$/, '')  // Remove " - ChatGPT" from end
+                        .trim();
+                } else if (metaDescription && metaDescription.content) {
+                    gptName = metaDescription.content.split('.')[0].trim();
+                }
+            }
             
-            // Add to recent GPTs
-            addToRecent(currentGPT);
+            // Method 4: Wait a bit and try again if page is still loading
+            if (!gptName || gptName === 'ChatGPT' || gptName === 'GPT') {
+                setTimeout(() => {
+                    console.log('GPT Organizer: Retrying GPT name detection...');
+                    detectCurrentGPT();
+                }, 1000);
+                return; // Don't set currentGPT yet
+            }
+            
+            // Always set as current GPT if we're on a custom GPT page
+            if (gptId && gptId.length > 0 && gptName) {
+                currentGPT = {
+                    id: gptId,
+                    name: gptName,
+                    url: url,
+                    timestamp: Date.now()
+                };
+                
+                console.log('GPT Organizer: Detected GPT:', gptName);
+                
+                // Add to recent GPTs
+                addToRecent(currentGPT);
+            } else {
+                currentGPT = null;
+            }
         } else {
             currentGPT = null;
         }
@@ -188,6 +328,11 @@
                 // Close any open modals
                 const modals = document.querySelectorAll('.modal');
                 modals.forEach(modal => modal.remove());
+                // Close context menu
+                const contextMenu = document.getElementById('gpt-context-menu');
+                if (contextMenu) {
+                    contextMenu.remove();
+                }
             }
         });
     }
@@ -234,7 +379,7 @@
     function toggleDarkMode() {
         isDarkMode = !isDarkMode;
         saveData();
-        updateContent();
+        injectIntoSidebar(); // This will recreate with correct theme
     }
 
     // Get theme-based colors
@@ -274,6 +419,155 @@
         return `${days}d`;
     }
 
+    // Show context menu for GPT items
+    function showContextMenu(event, gpt) {
+        event.preventDefault();
+        
+        // Remove existing context menu
+        const existingMenu = document.getElementById('gpt-context-menu');
+        if (existingMenu) {
+            existingMenu.remove();
+        }
+        
+        const theme = getThemeColors();
+        const menu = document.createElement('div');
+        menu.id = 'gpt-context-menu';
+        menu.style.cssText = `
+            position: fixed;
+            top: ${event.clientY}px;
+            left: ${event.clientX}px;
+            background: ${theme.surface};
+            border: 1px solid ${theme.border};
+            border-radius: 6px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            z-index: 10002;
+            min-width: 150px;
+            padding: 4px 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        `;
+        
+        // Add to existing folder options
+        if (folderOrder.length > 0) {
+            folderOrder.forEach(folderId => {
+                const folder = folders[folderId];
+                if (folder) {
+                    const option = document.createElement('div');
+                    option.textContent = `Add to ${folder.name}`;
+                    option.style.cssText = `
+                        padding: 8px 12px;
+                        cursor: pointer;
+                        font-size: 13px;
+                        color: ${theme.text};
+                        border-bottom: 1px solid ${theme.border};
+                    `;
+                    
+                    option.addEventListener('mouseenter', () => {
+                        option.style.background = theme.hover;
+                    });
+                    option.addEventListener('mouseleave', () => {
+                        option.style.background = 'transparent';
+                    });
+                    
+                    option.addEventListener('mousedown', (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        addGPTToFolder(folderId, gpt);
+                        menu.remove();
+                    });
+                    
+                    menu.appendChild(option);
+                }
+            });
+        }
+        
+        // Create new folder option
+        const createOption = document.createElement('div');
+        createOption.textContent = 'Create New Folder';
+        createOption.style.cssText = `
+            padding: 8px 12px;
+            cursor: pointer;
+            font-size: 13px;
+            color: #3b82f6;
+            font-weight: 500;
+        `;
+        
+        createOption.addEventListener('mouseenter', () => {
+            createOption.style.background = theme.hover;
+        });
+        createOption.addEventListener('mouseleave', () => {
+            createOption.style.background = 'transparent';
+        });
+        
+        createOption.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            menu.remove();
+            showCreateFolderModal(gpt);
+        });
+        
+        menu.appendChild(createOption);
+        
+        document.body.appendChild(menu);
+        
+        // Close menu when clicking outside
+        const closeMenu = (e) => {
+            if (!menu.contains(e.target)) {
+                menu.remove();
+                document.removeEventListener('click', closeMenu);
+                document.removeEventListener('contextmenu', closeMenu);
+            }
+        };
+        
+        setTimeout(() => {
+            document.addEventListener('click', closeMenu);
+            document.addEventListener('contextmenu', closeMenu);
+        }, 10);
+        
+        // Adjust position if menu goes off screen
+        const rect = menu.getBoundingClientRect();
+        if (rect.right > window.innerWidth) {
+            menu.style.left = (event.clientX - rect.width) + 'px';
+        }
+        if (rect.bottom > window.innerHeight) {
+            menu.style.top = (event.clientY - rect.height) + 'px';
+        }
+    }
+
+    // Add GPT to folder
+    function addGPTToFolder(folderId, gpt) {
+        if (!folders[folderId]) return;
+        
+        // Check if GPT is already in folder
+        const existingGPT = folders[folderId].gpts.find(g => g.id === gpt.id);
+        if (existingGPT) {
+            alert('GPT is already in this folder!');
+            return;
+        }
+        
+        folders[folderId].gpts.push(gpt);
+        saveData();
+        updateContent();
+        
+        // Show success notification
+        const notification = document.createElement('div');
+        notification.textContent = `Added "${gpt.name}" to "${folders[folderId].name}"`;
+        notification.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #10b981;
+            color: white;
+            padding: 12px 16px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            z-index: 10003;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        `;
+        document.body.appendChild(notification);
+        setTimeout(() => notification.remove(), 3000);
+    }
+
     // Inject into ChatGPT's sidebar
     function injectIntoSidebar() {
         // Find ChatGPT's sidebar
@@ -303,8 +597,8 @@
             <style>
                 #gpt-organizer-section {
                     border-top: 1px solid ${theme.border};
-                    margin-top: 12px;
-                    padding-top: 12px;
+                    margin-top: 8px;
+                    padding-top: 8px;
                     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
                 }
                 
@@ -334,19 +628,38 @@
                     transform: rotate(-90deg);
                 }
                 
+                .settings-btn-header {
+                    background: none;
+                    border: none;
+                    cursor: pointer;
+                    padding: 4px;
+                    border-radius: 3px;
+                    color: ${theme.textSecondary};
+                    font-size: 16px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    transition: background-color 0.2s, color 0.2s;
+                }
+                
+                .settings-btn-header:hover {
+                    background: ${theme.hover};
+                    color: ${theme.text};
+                }
+                
                 .gpt-organizer-content {
                     transition: all 0.2s;
                     overflow: hidden;
-                    padding: 0 12px;
+                    padding: 0 8px;
                 }
                 
                 .gpt-organizer-content.collapsed {
                     max-height: 0;
-                    padding: 0 12px;
+                    padding: 0 8px;
                 }
                 
                 .search-section {
-                    margin-bottom: 12px;
+                    margin-bottom: 8px;
                 }
                 
                 .search-input {
@@ -404,7 +717,7 @@
                 }
                 
                 .recent-section {
-                    margin-bottom: 12px;
+                    margin-bottom: 8px;
                 }
                 
                 .recent-header {
@@ -435,7 +748,7 @@
                 }
                 
                 .recent-list {
-                    max-height: 120px;
+                    max-height: 80px;
                     overflow-y: auto;
                     transition: all 0.2s;
                 }
@@ -447,7 +760,7 @@
                 
                 .recent-item {
                     padding: 4px 6px;
-                    margin-bottom: 2px;
+                    margin-bottom: 1px;
                     border-radius: 3px;
                     font-size: 10px;
                     background: ${theme.surface};
@@ -456,7 +769,8 @@
                     transition: background 0.2s;
                     display: flex;
                     justify-content: space-between;
-                    align-items: center;
+                    align-items: flex-start;
+                    min-height: 20px;
                 }
                 
                 .recent-item:hover {
@@ -468,11 +782,47 @@
                     font-weight: 500;
                     flex: 1;
                     text-decoration: none;
+                    word-wrap: break-word;
+                    word-break: break-word;
+                    white-space: normal;
+                    line-height: 1.3;
                 }
                 
                 .recent-item-time {
                     font-size: 9px;
                     color: ${theme.textSecondary};
+                    margin-top: 2px;
+                    flex-shrink: 0;
+                }
+                
+                .recent-item.current-gpt {
+                    background: linear-gradient(135deg, #10b981, #059669);
+                    border-color: #059669;
+                    position: relative;
+                }
+                
+                .recent-item.current-gpt .recent-item-name {
+                    color: white;
+                    font-weight: 600;
+                }
+                
+                .recent-item.current-gpt .recent-item-time {
+                    color: rgba(255, 255, 255, 0.8);
+                }
+                
+                .recent-item.current-gpt::before {
+                    content: '●';
+                    position: absolute;
+                    left: -8px;
+                    top: 50%;
+                    transform: translateY(-50%);
+                    color: #10b981;
+                    font-size: 12px;
+                    font-weight: bold;
+                }
+                
+                .recent-item.current-gpt:hover {
+                    background: linear-gradient(135deg, #059669, #047857);
                 }
                 
                 .current-gpt-section {
@@ -525,7 +875,7 @@
                 }
                 
                 .folder-list {
-                    margin-bottom: 8px;
+                    margin-bottom: 4px;
                 }
                 
                 .folder-item {
@@ -650,6 +1000,10 @@
                     width: calc(100% - 20px);
                     padding-right: 20px;
                     box-sizing: border-box;
+                    word-wrap: break-word;
+                    word-break: break-word;
+                    white-space: normal;
+                    line-height: 1.3;
                 }
                 
                 .folder-gpt-link:hover {
@@ -667,8 +1021,7 @@
                     font-weight: bold;
                     position: absolute;
                     right: 4px;
-                    top: 50%;
-                    transform: translateY(-50%);
+                    top: 4px;
                 }
                 
                 .remove-from-folder-btn:hover {
@@ -891,31 +1244,30 @@
             </style>
             
             <div class="gpt-organizer-header" id="organizer-header">
-                <span>📁 My GPT Folders</span>
-                <span class="organizer-caret ${isCollapsed ? 'collapsed' : ''}">▼</span>
+                <span>My GPT Folders</span>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <button id="settings-btn" class="settings-btn-header" title="Settings">⚙</button>
+                    <span class="organizer-caret ${isCollapsed ? 'collapsed' : ''}">▼</span>
+                </div>
             </div>
             
             <div class="gpt-organizer-content ${isCollapsed ? 'collapsed' : ''}">
-                <div class="search-section">
-                    <input type="text" class="search-input" id="gpt-search-input" placeholder="🔍 Search GPTs... (Ctrl+Shift+S)">
-                    <div class="search-results" id="search-results"></div>
-                </div>
+                <div id="current-gpt-display"></div>
+                
+                <button class="organizer-btn" id="create-folder-btn">+ Create Folder</button>
+                <div class="folder-list" id="folder-list"></div>
                 
                 <div class="recent-section" id="recent-section">
                     <div class="recent-header" id="recent-header">
-                        <span>🕒 Recent GPTs</span>
+                        <span>Recent GPTs</span>
                         <span class="recent-caret ${isRecentCollapsed ? 'collapsed' : ''}">▼</span>
                     </div>
                     <div class="recent-list ${isRecentCollapsed ? 'collapsed' : ''}" id="recent-list"></div>
                 </div>
                 
-                <div id="current-gpt-display"></div>
-                <div class="folder-list" id="folder-list"></div>
-                <button class="organizer-btn" id="create-folder-btn">+ Create Folder (Ctrl+Shift+F)</button>
-                <button class="organizer-btn settings-btn" id="settings-btn">⚙️ Settings</button>
-                
-                <div class="shortcuts-hint">
-                    💡 Ctrl+Shift+O: Toggle | S: Search | F: New Folder | Esc: Clear
+                <div class="search-section">
+                    <input type="text" class="search-input" id="gpt-search-input" placeholder="Search GPTs...">
+                    <div class="search-results" id="search-results"></div>
                 </div>
             </div>
         `;
@@ -957,12 +1309,22 @@
             return;
         }
         
-        searchResults.innerHTML = results.map(result => `
-            <div class="search-result-item" onclick="window.open('${result.url}', '_self')">
+        searchResults.innerHTML = results.map((result, index) => `
+            <div class="search-result-item" data-url="${result.url}" data-index="${index}">
                 <div class="search-result-name">${result.name}</div>
                 <div class="search-result-folder" style="color: ${result.folderColor}">📁 ${result.folderName}</div>
             </div>
         `).join('');
+        
+        // Add click event listeners to search results
+        searchResults.querySelectorAll('.search-result-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const url = item.dataset.url;
+                if (url) {
+                    window.location.href = url;
+                }
+            });
+        });
     }
 
     // Toggle collapse state
@@ -1062,34 +1424,53 @@
         
         if (!currentSection || !folderList) return;
 
-        // Update recent GPTs
-        if (recentGPTs.length > 0) {
-            recentSection.style.display = 'block';
-            recentList.innerHTML = recentGPTs.slice(0, 5).map(gpt => `
-                <div class="recent-item">
-                    <a href="${gpt.url}" class="recent-item-name">${gpt.name}</a>
-                    <span class="recent-item-time">${timeAgo(gpt.timestamp)}</span>
-                </div>
-            `).join('');
-        } else {
-            recentSection.style.display = 'none';
-        }
-
-        // Update current GPT section
+        // Update current GPT section (separate from recent)
         if (currentGPT) {
             currentSection.innerHTML = `
-                <div class="current-gpt-section">
-                    <div class="current-gpt-name">${currentGPT.name}</div>
-                    <button class="organizer-btn add-btn" id="add-to-folder-btn">Add to Folder</button>
+                <div class="recent-section" style="margin-bottom: 15px;">
+                    <div class="recent-header">
+                        <span>Current GPT</span>
+                    </div>
+                    <div class="recent-list">
+                        <div class="recent-item current-gpt" data-gpt='${JSON.stringify(currentGPT)}'>
+                            <a href="${currentGPT.url}" class="recent-item-name">${currentGPT.name}</a>
+                        </div>
+                    </div>
                 </div>
             `;
             
-            const addBtn = document.getElementById('add-to-folder-btn');
-            if (addBtn) {
-                addBtn.addEventListener('click', showAddToFolderModal);
+            // Add context menu to current GPT
+            const currentGptItem = currentSection.querySelector('.recent-item');
+            if (currentGptItem) {
+                currentGptItem.addEventListener('contextmenu', (e) => {
+                    showContextMenu(e, currentGPT);
+                });
             }
         } else {
             currentSection.innerHTML = '';
+        }
+
+        // Update recent GPTs (without current GPT highlighting since it's separate now)
+        if (recentGPTs.length > 0) {
+            recentSection.style.display = 'block';
+            recentList.innerHTML = recentGPTs.slice(0, 5).map(gpt => {
+                return `
+                    <div class="recent-item" data-gpt='${JSON.stringify(gpt)}'>
+                        <a href="${gpt.url}" class="recent-item-name">${gpt.name}</a>
+                        <span class="recent-item-time">${timeAgo(gpt.timestamp)}</span>
+                    </div>
+                `;
+            }).join('');
+            
+            // Add context menu to recent items
+            recentList.querySelectorAll('.recent-item').forEach(item => {
+                item.addEventListener('contextmenu', (e) => {
+                    const gpt = JSON.parse(item.dataset.gpt);
+                    showContextMenu(e, gpt);
+                });
+            });
+        } else {
+            recentSection.style.display = 'none';
         }
 
         // Hide folders if searching
@@ -1113,6 +1494,29 @@
         // Remove deleted folders from order
         folderOrder = folderOrder.filter(folderId => folders[folderId]);
         
+        // Show empty state if no folders
+        if (folderOrder.length === 0) {
+            const colors = getThemeColors();
+            const emptyMessage = document.createElement('div');
+            emptyMessage.textContent = 'No folders yet. Click + Create Folder to get started!';
+            emptyMessage.style.cssText = `
+                padding: 16px;
+                text-align: center;
+                color: ${colors.textSecondary};
+                font-size: 12px;
+                font-style: italic;
+                background: ${colors.surface};
+                border: 1px solid ${colors.border};
+                border-radius: 6px;
+                margin-bottom: 8px;
+                word-wrap: break-word;
+                word-break: break-word;
+                white-space: normal;
+                line-height: 1.4;
+            `;
+            folderList.appendChild(emptyMessage);
+        }
+        
         folderOrder.forEach(folderId => {
             const folder = folders[folderId];
             if (!folder) return;
@@ -1129,14 +1533,14 @@
                 <div class="folder-header" style="display: flex; align-items: center; justify-content: space-between; width: 100%; padding-left: 16px;">
                     <div style="display: flex; align-items: center; gap: 6px;">
                         <button class="folder-action-btn expand-btn" data-folder-id="${folderId}" title="Expand">▶</button>
-                        <div class="folder-name" style="color: ${folder.color}">${folder.name}</div>
+                        <div class="folder-name" style="color: ${folder.color}; cursor: pointer;" data-folder-id="${folderId}" title="Click to rename">${folder.name}</div>
                         <span class="folder-count">${folder.gpts.length}</span>
                     </div>
                     <button class="folder-action-btn delete-btn" data-folder-id="${folderId}" title="Delete">✕</button>
                 </div>
                 <div class="folder-gpts" id="folder-gpts-${folderId}">
                     ${folder.gpts.map(gpt => `
-                        <div class="folder-gpt-item">
+                        <div class="folder-gpt-item" data-gpt='${JSON.stringify(gpt)}'>
                             <a href="${gpt.url}" class="folder-gpt-link">${gpt.name}</a>
                             <button class="remove-from-folder-btn" data-folder-id="${folderId}" data-gpt-id="${gpt.id}">✕</button>
                         </div>
@@ -1148,10 +1552,17 @@
             const expandBtn = folderDiv.querySelector('.expand-btn');
             const folderHeader = folderDiv.querySelector('.folder-header');
             const deleteBtn = folderDiv.querySelector('.delete-btn');
+            const folderNameDiv = folderDiv.querySelector('.folder-name');
             
-            // Make the entire header clickable for expansion (except delete button)
+            // Make folder name editable
+            folderNameDiv.addEventListener('click', (e) => {
+                e.stopPropagation();
+                startEditingFolderName(folderId, folderNameDiv);
+            });
+            
+            // Make the entire header clickable for expansion (except delete button and folder name)
             folderHeader.addEventListener('click', (e) => {
-                if (e.target !== deleteBtn) {
+                if (e.target !== deleteBtn && e.target !== folderNameDiv) {
                     toggleFolderExpansion(folderId, folderDiv);
                 }
             });
@@ -1173,6 +1584,14 @@
                 });
             });
             
+            // Add context menu to folder GPT items
+            folderDiv.querySelectorAll('.folder-gpt-item').forEach(item => {
+                item.addEventListener('contextmenu', (e) => {
+                    const gpt = JSON.parse(item.dataset.gpt);
+                    showContextMenu(e, gpt);
+                });
+            });
+            
             // Setup drag and drop
             setupDragAndDrop(folderDiv, folderId);
             
@@ -1181,7 +1600,7 @@
     }
 
     // Show create folder modal
-    function showCreateFolderModal() {
+    function showCreateFolderModal(gptToAdd = null) {
         const theme = getThemeColors();
         const modal = document.createElement('div');
         modal.className = 'modal';
@@ -1232,12 +1651,33 @@
                 folders[folderId] = {
                     name: name,
                     color: selectedColor,
-                    gpts: []
+                    gpts: (gptToAdd && gptToAdd.id && gptToAdd.name) ? [gptToAdd] : []
                 };
                 folderOrder.push(folderId); // Add to end of order
                 saveData();
                 updateContent();
                 closeModal();
+                
+                if (gptToAdd && gptToAdd.id && gptToAdd.name) {
+                    // Show success notification
+                    const notification = document.createElement('div');
+                    notification.textContent = `Created folder "${name}" and added "${gptToAdd.name}"`;
+                    notification.style.cssText = `
+                        position: fixed;
+                        top: 20px;
+                        right: 20px;
+                        background: #10b981;
+                        color: white;
+                        padding: 12px 16px;
+                        border-radius: 6px;
+                        font-size: 14px;
+                        font-weight: 500;
+                        z-index: 10003;
+                        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                    `;
+                    document.body.appendChild(notification);
+                    setTimeout(() => notification.remove(), 3000);
+                }
             }
         });
         
@@ -1298,6 +1738,63 @@
         }
     }
 
+    // Start editing folder name
+    function startEditingFolderName(folderId, folderNameDiv) {
+        const currentName = folders[folderId].name;
+        const folderColor = folders[folderId].color;
+        
+        // Create input element
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = currentName;
+        input.style.cssText = `
+            background: transparent;
+            border: 1px solid ${folderColor};
+            border-radius: 3px;
+            padding: 2px 4px;
+            font-size: 11px;
+            font-weight: 500;
+            color: ${folderColor};
+            width: 80px;
+            font-family: inherit;
+        `;
+        
+        // Replace folder name with input
+        folderNameDiv.style.display = 'none';
+        folderNameDiv.parentNode.insertBefore(input, folderNameDiv);
+        input.focus();
+        input.select();
+        
+        // Save on Enter or blur
+        function saveEdit() {
+            const newName = input.value.trim();
+            if (newName && newName !== currentName) {
+                folders[folderId].name = newName;
+                saveData();
+            }
+            input.remove();
+            folderNameDiv.style.display = 'block';
+            updateContent();
+        }
+        
+        // Cancel on Escape
+        function cancelEdit() {
+            input.remove();
+            folderNameDiv.style.display = 'block';
+        }
+        
+        input.addEventListener('blur', saveEdit);
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                saveEdit();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                cancelEdit();
+            }
+        });
+    }
+
     // Delete folder
     function deleteFolder(folderId) {
         if (confirm('Are you sure you want to delete this folder?')) {
@@ -1316,13 +1813,29 @@
         modal.innerHTML = `
             <div class="modal-content">
                 <div class="modal-header">Settings</div>
+                
+                <div class="form-group">
+                    <label class="form-label">How to Use</label>
+                    <div style="background: ${theme.background}; padding: 12px; border-radius: 6px; border: 1px solid ${theme.border}; margin-bottom: 16px; font-size: 12px; line-height: 1.4;">
+                        <div style="margin-bottom: 12px;"><strong>Creating and Managing Folders</strong></div>
+                        <div style="margin-bottom: 8px;"><strong>New Folder:</strong><br>Hit the blue + Create Folder to make a new folder.</div>
+                        <div style="margin-bottom: 8px;"><strong>Add to Folder:</strong><br>Open your GPT—you will see it highlighted on top. Right-click on the GPT to add it to an existing folder or create a new one on the spot.</div>
+                        <div style="margin-bottom: 8px;"><strong>Search:</strong><br>The search function only finds GPTs that have been added to folders or are in your Recent GPTs list.</div>
+                        <div style="margin-bottom: 12px;"><strong>Reorder Folders:</strong><br>Just click and drag to rearrange them.</div>
+                        <div style="margin-bottom: 12px;"><strong>Keyboard Shortcuts</strong></div>
+                        <div style="margin-bottom: 4px;">Want to move faster? Use these:</div>
+                        <div style="margin-left: 16px; margin-bottom: 4px;">• Ctrl + Shift + O – Show or hide the sidebar</div>
+                        <div style="margin-left: 16px; margin-bottom: 4px;">• Ctrl + Shift + S – Jump straight to search</div>
+                        <div style="margin-left: 16px; margin-bottom: 4px;">• Ctrl + Shift + F – Create a new folder</div>
+                        <div style="margin-left: 16px;">• Esc – Cancel search or close any open menus</div>
+                    </div>
+                </div>
+                
                 <div class="form-group">
                     <div class="theme-toggle">
                         <span>Dark Mode</span>
                         <div class="theme-switch" id="theme-switch"></div>
                     </div>
-                    <button class="btn btn-secondary" id="export-btn" style="width: 100%; margin-bottom: 8px;">Export Data</button>
-                    <button class="btn btn-secondary" id="import-btn" style="width: 100%; margin-bottom: 8px;">Import Data</button>
                     <button class="btn btn-secondary" id="clear-recent-btn" style="width: 100%; margin-bottom: 8px;">Clear Recent GPTs</button>
                     <button class="btn btn-danger" id="reset-btn" style="width: 100%;">Reset All Data</button>
                 </div>
@@ -1337,49 +1850,24 @@
         // Add event listeners
         document.getElementById('theme-switch').addEventListener('click', function() {
             toggleDarkMode();
-            closeModal();
-            // Re-inject to apply theme changes
-            setTimeout(injectIntoSidebar, 100);
-        });
-        
-        document.getElementById('export-btn').addEventListener('click', function() {
-            const data = JSON.stringify({ folders, folderOrder, recentGPTs, isDarkMode }, null, 2);
-            const blob = new Blob([data], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'gpt-folders-backup.json';
-            a.click();
-            URL.revokeObjectURL(url);
-        });
-        
-        document.getElementById('import-btn').addEventListener('click', function() {
-            const input = document.createElement('input');
-            input.type = 'file';
-            input.accept = '.json';
-            input.onchange = function(e) {
-                const file = e.target.files[0];
-                if (file) {
-                    const reader = new FileReader();
-                    reader.onload = function(e) {
-                        try {
-                            const importedData = JSON.parse(e.target.result);
-                            folders = importedData.folders || importedData.gptFolders || {};
-                            folderOrder = importedData.folderOrder || Object.keys(folders);
-                            recentGPTs = importedData.recentGPTs || [];
-                            isDarkMode = importedData.isDarkMode || false;
-                            saveData();
-                            updateContent();
-                            closeModal();
-                            alert('Data imported successfully!');
-                        } catch (error) {
-                            alert('Error importing data. Please check the file format.');
-                        }
-                    };
-                    reader.readAsText(file);
+            
+            // Update modal theme immediately
+            const newTheme = getThemeColors();
+            const modalContent = modal.querySelector('.modal-content');
+            
+            // Update modal background
+            modalContent.style.background = newTheme.surface;
+            modalContent.style.color = newTheme.text;
+            
+            // Update instructions background - target the first form-group's inner div
+            const firstFormGroup = modal.querySelector('.form-group');
+            if (firstFormGroup) {
+                const instructionsDiv = firstFormGroup.querySelector('div');
+                if (instructionsDiv && instructionsDiv.style.padding) {
+                    instructionsDiv.style.background = newTheme.background;
+                    instructionsDiv.style.borderColor = newTheme.border;
                 }
-            };
-            input.click();
+            }
         });
         
         document.getElementById('clear-recent-btn').addEventListener('click', function() {
